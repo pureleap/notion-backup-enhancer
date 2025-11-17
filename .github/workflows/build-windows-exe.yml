@@ -1,4 +1,4 @@
-name: Build Windows Executable
+name: Build Executables
 
 on:
   push:
@@ -9,7 +9,20 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            executable_name: NotionBackupEnhancer.exe
+            executable_path: export-fix/dist/NotionBackupEnhancer.exe
+            artifact_name: NotionBackupEnhancer-windows
+          - os: macos-latest
+            executable_name: NotionBackupEnhancer
+            executable_path: export-fix/dist/NotionBackupEnhancer
+            artifact_name: NotionBackupEnhancer-macos
+
+    runs-on: ${{ matrix.os }}
 
     steps:
     - name: Checkout code
@@ -34,6 +47,6 @@ jobs:
     - name: Upload executable
       uses: actions/upload-artifact@v4
       with:
-        name: NotionBackupEnhancer-exe
-        path: export-fix/dist/NotionBackupEnhancer.exe
+        name: ${{ matrix.artifact_name }}
+        path: ${{ matrix.executable_path }}
         retention-days: 30
