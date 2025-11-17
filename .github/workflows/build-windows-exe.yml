@@ -50,3 +50,34 @@ jobs:
         name: ${{ matrix.artifact_name }}
         path: ${{ matrix.executable_path }}
         retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download Windows executable
+      uses: actions/download-artifact@v4
+      with:
+        name: NotionBackupEnhancer-windows
+
+    - name: Download macOS executable
+      uses: actions/download-artifact@v4
+      with:
+        name: NotionBackupEnhancer-macos
+
+    - name: Create release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.sha }}
+        name: Build ${{ github.sha }}
+        generate_release_notes: true
+        files: |
+          NotionBackupEnhancer.exe
+          NotionBackupEnhancer
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
