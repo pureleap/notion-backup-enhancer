@@ -268,7 +268,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                         try:
                             abs_path = os.path.join(root, file)
                             rel_path = os.path.relpath(abs_path, tmp_dir)
-                            file_entries.append((rel_path, abs_path))
+                            file_entries.append((rel_path, None, abs_path))
                         except (OSError, ValueError) as e:
                             error_msg = f"Skipping file due to path error: {os.path.join(root, file)} - {e}"
                             print(f"Warning: {error_msg}")
@@ -282,7 +282,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
 
             # Build proposed renames
             proposed: Dict[str, str] = {}
-            for rel_path, _ in file_entries:
+            for rel_path, _, _ in file_entries:
                 new_path = renamer.rename_path(rel_path)
                 proposed[rel_path] = new_path
 
@@ -391,17 +391,31 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
             if nested_files and nested_zip_data is not None:
                 # Process files from nested zip in memory directly between the two zips
                 # All nested files share the same zip data
-                file_entries = [(f, nested_zip_data) for f in nested_files]
+
+                # Strip common top-level directory prefix to place files directly in zip root
+                common_prefix = ""
+                if nested_files:
+                    # Find common directory prefix (e.g., 'Export-2023-11-17/')
+                    common_prefix = os.path.commonprefix(nested_files)
+                    # Ensure it's a complete directory path (ends with / and all files start with it)
+                    if common_prefix and common_prefix.endswith('/') and all(f.startswith(common_prefix) for f in nested_files):
+                        print(f"Stripping common directory prefix: {common_prefix.rstrip('/')}")
+                    else:
+                        common_prefix = ""
+
+                # file_entries: (processed_path, zip_data, original_path)
+                # processed_path is used for renaming logic, original_path for reading from zip
+                file_entries = [(f[len(common_prefix):] if common_prefix else f, nested_zip_data, f) for f in nested_files]
             else:
-                # Use main zip files
-                file_entries = [(f, None) for f in all_files]
+                # Use main zip files: (processed_path, zip_data, original_path)
+                file_entries = [(f, None, f) for f in all_files]
 
             # Initialize renamer
             renamer = NotionExportRenamer(filename_too_long_tracker=filename_too_long)
 
             # Build proposed renames
             proposed: Dict[str, str] = {}
-            for rel_path, _ in file_entries:
+            for rel_path, _, _ in file_entries:
                 new_path = renamer.rename_path(rel_path)
                 proposed[rel_path] = new_path
 
@@ -433,7 +447,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
 
             # Final mapping with collision resolution
             final_map: Dict[str, str] = {}
-            for rel_path, _ in file_entries:
+            for rel_path, _, _ in file_entries:
                 proposed_path = proposed[rel_path]
                 parent, fname = os.path.split(proposed_path)
                 final_fname = reserve(parent, fname)
@@ -441,15 +455,15 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
 
             # Write output zip with renamed files and fixed links
             with zipfile.ZipFile(new_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
-                for rel_path, zip_data in file_entries:
+                for rel_path, zip_data, original_path in file_entries:
                     final_path = final_map[rel_path]
 
                     try:
                         # Read file content
                         if zip_data is not None:
-                            # Read from nested zip in memory
+                            # Read from nested zip in memory using original path
                             with zipfile.ZipFile(io.BytesIO(zip_data)) as inner_zf:
-                                with inner_zf.open(rel_path) as file_obj:
+                                with inner_zf.open(original_path) as file_obj:
                                     file_content = file_obj.read()
                         else:
                             # Read from main zip
