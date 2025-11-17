@@ -1,0 +1,39 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -r export-fix/requirements.txt
+
+    - name: Build executable
+      run: |
+        cd export-fix
+        pyinstaller --onefile --console --name NotionBackupEnhancer drag_drop_entry.py
+
+    - name: Upload executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: NotionBackupEnhancer-exe
+        path: export-fix/dist/NotionBackupEnhancer.exe
+        retention-days: 30
