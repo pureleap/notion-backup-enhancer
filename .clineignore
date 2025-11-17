@@ -1,0 +1,5 @@
+Export/
+Archive/
+Max/
+*.zip
+.venv/
