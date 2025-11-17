@@ -80,14 +80,24 @@ class NotionExportRenamer:
         path, name = os.path.split(path_to_rename)
         name_no_ext, ext = os.path.splitext(name)
 
-        # If name ends with ID, strip it
-        id_match = ID_SUFFIX_RE.search(name_no_ext)
-        if id_match:
-            base_part = id_match.group(1)
-            new_name_no_ext = base_part
+        # Check if the entire name is just a 32-char hex ID (for directories)
+        if re.match(r"^[0-9a-f]{32}$", name_no_ext, re.IGNORECASE):
+            new_name_no_ext = ""
         else:
-            # No ID, keep original
-            new_name_no_ext = name_no_ext
+            # First, try the existing regex for trailing space + hex
+            id_match = ID_SUFFIX_RE.search(name_no_ext)
+            if id_match:
+                base_part = id_match.group(1)
+                new_name_no_ext = base_part
+            else:
+                # For _all files, remove hex ID before _all
+                all_match = re.search(r"(.+?)([0-9a-f]{32})_all(.*)$", name_no_ext, re.IGNORECASE)
+                if all_match:
+                    base_part = all_match.group(1)
+                    suffix_part = all_match.group(3)
+                    new_name_no_ext = base_part + "_all" + suffix_part
+                else:
+                    new_name_no_ext = name_no_ext
 
         # Sanitize
         new_name_no_ext = self._sanitize_name(new_name_no_ext, path_to_rename)
@@ -100,7 +110,9 @@ class NotionExportRenamer:
         parts = re.split(r"[\\/]", path_to_rename)
         paths = [os.path.join(*parts[0:rpc + 1]) for rpc in range(len(parts))]
         renamed_parts = [self._rewrite_single_basename(p) for p in paths]
-        return os.path.join(*renamed_parts)
+        # Filter out empty parts (from hex-only directory names)
+        filtered_parts = [p for p in renamed_parts if p]
+        return os.path.join(*filtered_parts) if filtered_parts else ""
 
 
 def md_file_rewrite(
@@ -295,20 +307,18 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                     duplicates[prop] = origs
 
             # Handle collisions
-            registry: Dict[str, set[str]] = {}
+            registry = set()
 
             def reserve(parent: str, filename: str) -> str:
-                parent_norm = _normalize_zip_path(parent).rstrip("/")
-                used = registry.setdefault(parent_norm, set())
-                if filename not in used:
-                    used.add(filename)
+                if filename not in registry:
+                    registry.add(filename)
                     return filename
                 name_no_ext, ext = os.path.splitext(filename)
                 i = 1
                 while True:
                     cand = f"{name_no_ext} ({i}){ext}"
-                    if cand not in used:
-                        used.add(cand)
+                    if cand not in registry:
+                        registry.add(cand)
                         return cand
                     i += 1
 
@@ -428,20 +438,18 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                     duplicates[prop] = origs
 
             # Handle collisions
-            registry: Dict[str, set[str]] = {}
+            registry = set()
 
             def reserve(parent: str, filename: str) -> str:
-                parent_norm = _normalize_zip_path(parent).rstrip("/")
-                used = registry.setdefault(parent_norm, set())
-                if filename not in used:
-                    used.add(filename)
+                if filename not in registry:
+                    registry.add(filename)
                     return filename
                 name_no_ext, ext = os.path.splitext(filename)
                 i = 1
                 while True:
                     cand = f"{name_no_ext} ({i}){ext}"
-                    if cand not in used:
-                        used.add(cand)
+                    if cand not in registry:
+                        registry.add(cand)
                         return cand
                     i += 1
 
