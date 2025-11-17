@@ -2,21 +2,11 @@
 """
 Export Fix - Modern Notion export enhancer compatible with Python 3.13+
 
-Replicates the behavior of scripts/fix-filenames/notion_export_enhancer/enhancer.py using
-modern dependencies and a robust offline-first approach.
-
 Features:
 - Works with a Notion export .zip or an already-extracted directory
 - Removes trailing 32-hex Notion IDs from filenames and directories
-- Optionally enhances names using Notion official API when a token is provided:
-  * Fetch page title to undo 50-char truncation and sanitize
-  * Prefix single-emoji page icon when available
-  * Use created_time and last_edited_time when available
-- Moves top-level .md into same-named folder as !index.md (optional)
-- Rewrites relative links and images in Markdown to match renamed paths (optional)
-- Optionally removes the top-level H1 title line from Markdown
 - Handles naming collisions by appending " (i)"
-- Produces a new .zip <input>.formatted.zip or writes to output dir
+- Produces a new .zip <input>.fixed.zip
 
 CLI:
   export_fix.py [--notion-api-token TOKEN] [--output-path PATH] [--dest-dir PATH]
