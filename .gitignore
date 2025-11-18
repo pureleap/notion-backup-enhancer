@@ -1,3 +1,4 @@
 *.zip
 *.zip.formatted
 *log.txt
+__pycache__
