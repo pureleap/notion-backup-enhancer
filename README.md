@@ -8,6 +8,10 @@ Simply drag and drop the Notion ZIP on the Notion Backup Enhancer executable:
 
 ![Drag and Drop Notion Zip](docs/drag-and-drop-zip.gif)
 
+And a new ZIP file will be created: 
+
+![Fixed ZIP File](docs/generated-files.png)
+
 Based on [notion_export_enhancer](https://github.com/Cobertos/notion_export_enhancer).
 
 ## Features
