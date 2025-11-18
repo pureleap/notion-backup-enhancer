@@ -1,7 +1,2 @@
-# Core optional dependencies for export_fix.py enrichment mode
-notion-client>=2.2.1
-tenacity>=9.0.0
-emoji>=2.12.1
-
 # Testing dependencies
 pytest>=7.0.0
