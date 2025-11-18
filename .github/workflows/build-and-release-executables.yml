@@ -8,7 +8,34 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r export-fix/requirements.txt
+
+    - name: Run tests
+      run: |
+        cd export-fix
+        python -m pytest tests/ -v
+
   build:
+    needs: test
     strategy:
       matrix:
         os: [windows-latest, macos-latest]
@@ -37,7 +64,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pyinstaller
-        pip install -r export-fix/requirements.txt
+        pip install -r export-fix/requirements.txt --exclude pytest
 
     - name: Build executable
       run: |
