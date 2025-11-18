@@ -4,6 +4,10 @@ Fixes various issues in Notion workspaces exports.
 
 The fixed export files can be extracted into a directory and will allow for easy tracking of changes (e.g. using GitHub or another backup solution).
 
+Simply drag and drop the Notion ZIP on the Notion Backup Enhancer executable:
+
+![Drag and Drop Notion Zip](docs/drag-and-drop-zip.gif)
+
 Based on [notion_export_enhancer](https://github.com/Cobertos/notion_export_enhancer).
 
 ## Features
