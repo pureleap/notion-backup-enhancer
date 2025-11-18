@@ -12,6 +12,8 @@ And a new ZIP file will be created:
 
 ![Fixed ZIP File](docs/generated-files.png)
 
+⚠️ Note this tool is EXPERIMENTAL - please validate the generated files. Any problems you encounter, please [raise an issue](https://github.com/pureleap/notion-backup-enhancer/issues)!
+
 Based on [notion_export_enhancer](https://github.com/Cobertos/notion_export_enhancer).
 
 ## Features
