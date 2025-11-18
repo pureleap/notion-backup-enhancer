@@ -1,5 +1,5 @@
 {
   "github-actions.workflows.pinned.workflows": [
-    ".github/workflows/build-windows-exe.yml"
+    ".github/workflows/build-and-release-executables.yml"
   ]
 }
