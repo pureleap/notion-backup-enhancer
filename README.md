@@ -17,5 +17,6 @@ Based on [notion_export_enhancer](https://github.com/Cobertos/notion_export_enha
 ## How to Use
 
 - Download Notion workspace export
-- Run: `python export_fix.py path/to/notion-export.zip`
-- The output will be `path/to/notion-export.fixed.zip`
+- Download the executable from the [Releases](https://github.com/pureleap/notion-backup-enhancer/releases) for your operating system 
+- Drag and drop the Notion workspace export ZIP onto the executable
+- You will get a new ZIP file that has many of the issues with Notion exports resolved
