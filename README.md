@@ -46,7 +46,7 @@ Based on [notion_export_enhancer](https://github.com/Cobertos/notion_export_enha
 - Go to the [Releases](https://github.com/pureleap/notion-backup-enhancer/releases) page
 - Download the appropriate file for your operating system:
   - **Windows**: Download the `.exe` file
-  - **Mac OS X**: Download the file without extension
+  - **Mac OS X**: Download the file without extension (since I don't have a MAC, I haven't tested it - let me know if there are any issues)
 
 ### Step 3: Process the Export
 
