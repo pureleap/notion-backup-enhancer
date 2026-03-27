@@ -11,7 +11,7 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
 
     runs-on: ${{ matrix.os }}
 
@@ -38,7 +38,7 @@ jobs:
     needs: test
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
         include:
           - os: windows-latest
             executable_name: NotionBackupEnhancer.exe
@@ -48,6 +48,10 @@ jobs:
             executable_name: NotionBackupEnhancer
             executable_path: export-fix/dist/NotionBackupEnhancer
             artifact_name: NotionBackupEnhancer-macos
+          - os: ubuntu-latest
+            executable_name: NotionBackupEnhancer
+            executable_path: export-fix/dist/NotionBackupEnhancer
+            artifact_name: NotionBackupEnhancer-ubuntu
 
     runs-on: ${{ matrix.os }}
 
@@ -92,11 +96,19 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: NotionBackupEnhancer-windows
+        path: windows
 
     - name: Download macOS executable
       uses: actions/download-artifact@v4
       with:
         name: NotionBackupEnhancer-macos
+        path: macos
+
+    - name: Download Ubuntu executable
+      uses: actions/download-artifact@v4
+      with:
+        name: NotionBackupEnhancer-ubuntu
+        path: ubuntu
 
     - name: Create release
       uses: softprops/action-gh-release@v2
@@ -105,7 +117,8 @@ jobs:
         name: Release v${{ github.run_number }}
         generate_release_notes: true
         files: |
-          NotionBackupEnhancer.exe
-          NotionBackupEnhancer
+          windows/NotionBackupEnhancer.exe
+          macos/NotionBackupEnhancer
+          ubuntu/NotionBackupEnhancer
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
