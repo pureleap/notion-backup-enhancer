@@ -2,3 +2,4 @@
 *.zip.formatted
 *log.txt
 __pycache__
+NotionBackupEnhancer*
