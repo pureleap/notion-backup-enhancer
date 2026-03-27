@@ -41,6 +41,12 @@ from typing import Dict, Iterable, Optional, Tuple
 import shutil
 
 
+def _set_zip_permissions(zi: zipfile.ZipInfo, is_dir: bool = False) -> None:
+    """Set Unix permissions: 755 for dirs, 644 for files."""
+    perms = 0o755 if is_dir else 0o644
+    zi.external_attr = (perms << 16) | (0x10 if is_dir else 0)
+
+
 ID_SUFFIX_RE = re.compile(r"(.+?)\s([0-9a-f]{32})$", re.IGNORECASE)
 MD_LINK_OR_IMAGE_RE = re.compile(
     r"!?\[.+?\]\(([\w\d\-._~:/?=#%\]\[@!$&'\(\)*+,;]+?)\)"
@@ -183,6 +189,7 @@ def _ensure_zip_parent_dirs(zf: zipfile.ZipFile, file_path: str, date_time: Tupl
     for i in range(len(parts) - 1):
         acc = f"{acc}{parts[i]}/"
         zi = zipfile.ZipInfo(acc, date_time)
+        _set_zip_permissions(zi, is_dir=True)
         zf.writestr(zi, b"")
 
 
@@ -342,6 +349,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                                     md_content = f.read()
                                 md_content = md_file_rewrite(renamer, rel_path, md_content, final_map)
                                 zi = zipfile.ZipInfo(_normalize_zip_path(final_path))
+                                _set_zip_permissions(zi)
                                 _ensure_zip_parent_dirs(out_zf, final_path, zi.date_time)
                                 out_zf.writestr(zi, md_content.encode("utf-8"))
                             except Exception as e:
@@ -350,11 +358,13 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                                 errors.append((rel_path, error_msg))
                                 # Copy as-is
                                 zi = zipfile.ZipInfo(_normalize_zip_path(final_path))
+                                _set_zip_permissions(zi)
                                 _ensure_zip_parent_dirs(out_zf, final_path, zi.date_time)
                                 out_zf.write(abs_path, _normalize_zip_path(final_path))
                         else:
                             # Copy other files as-is
                             zi = zipfile.ZipInfo(_normalize_zip_path(final_path))
+                            _set_zip_permissions(zi)
                             _ensure_zip_parent_dirs(out_zf, final_path, zi.date_time)
                             out_zf.write(abs_path, _normalize_zip_path(final_path))
                     except Exception as e:
@@ -495,6 +505,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
 
                         # Write to output zip
                         zi = zipfile.ZipInfo(_normalize_zip_path(final_path))
+                        _set_zip_permissions(zi)
                         _ensure_zip_parent_dirs(out_zf, final_path, zi.date_time)
                         out_zf.writestr(zi, file_content)
 
