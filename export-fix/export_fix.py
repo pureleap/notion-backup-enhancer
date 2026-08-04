@@ -27,6 +27,7 @@ Install (pip + venv example):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import os
 import re
@@ -48,10 +49,24 @@ def _set_zip_permissions(zi: zipfile.ZipInfo, is_dir: bool = False) -> None:
 
 
 ID_SUFFIX_RE = re.compile(r"(.+?)\s([0-9a-f]{32})$", re.IGNORECASE)
-MD_LINK_OR_IMAGE_RE = re.compile(
-    r"!?\[.+?\]\(([\w\d\-._~:/?=#%\]\[@!$&'\(\)*+,;]+?)\)"
-)
+MD_LINK_OR_IMAGE_RE = re.compile(r"!?\[.+?\]\(([\w\d\-._~:/?=#%\]\[@!$&'\(\)*+,;]+?)\)")
 INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
+
+
+def _extract_short_id_from_path(path: str) -> str:
+    """Extract a deterministic short hash from a Notion ID embedded in the path."""
+    parts = re.split(r"[\\/]", path)
+    for part in parts:
+        name_no_ext = os.path.splitext(part)[0]
+        m = ID_SUFFIX_RE.search(name_no_ext)
+        if m:
+            return hashlib.sha256(m.group(2).encode()).hexdigest()[:8]
+        if re.match(r"^[0-9a-f]{32}$", name_no_ext, re.IGNORECASE):
+            return hashlib.sha256(name_no_ext.lower().encode()).hexdigest()[:8]
+        all_match = re.search(r"([0-9a-f]{32})_all", name_no_ext, re.IGNORECASE)
+        if all_match:
+            return hashlib.sha256(all_match.group(1).encode()).hexdigest()[:8]
+    return ""
 
 
 class NotionExportRenamer:
@@ -70,7 +85,9 @@ class NotionExportRenamer:
         name = INVALID_FILENAME_CHARS.sub(" ", name).strip()
         if len(name) > 200:
             if self._filename_too_long_tracker is not None:
-                self._filename_too_long_tracker.append((original_path, original_name, len(original_name)))
+                self._filename_too_long_tracker.append(
+                    (original_path, original_name, len(original_name))
+                )
             name = name[:200]
         # Collapse multiple spaces
         name = re.sub(r"\s{2,}", " ", name)
@@ -97,7 +114,9 @@ class NotionExportRenamer:
                 new_name_no_ext = base_part
             else:
                 # For _all files, remove hex ID before _all
-                all_match = re.search(r"(.+?)([0-9a-f]{32})_all(.*)$", name_no_ext, re.IGNORECASE)
+                all_match = re.search(
+                    r"(.+?)([0-9a-f]{32})_all(.*)$", name_no_ext, re.IGNORECASE
+                )
                 if all_match:
                     base_part = all_match.group(1)
                     suffix_part = all_match.group(3)
@@ -114,7 +133,7 @@ class NotionExportRenamer:
 
     def rename_path(self, path_to_rename: str) -> str:
         parts = re.split(r"[\\/]", path_to_rename)
-        paths = [os.path.join(*parts[0:rpc + 1]) for rpc in range(len(parts))]
+        paths = [os.path.join(*parts[0 : rpc + 1]) for rpc in range(len(parts))]
         renamed_parts = [self._rewrite_single_basename(p) for p in paths]
         # Filter out empty parts (from hex-only directory names)
         filtered_parts = [p for p in renamed_parts if p]
@@ -170,7 +189,7 @@ def md_file_rewrite(
         new_rel = re.sub(r"[\\]+", "/", new_rel)
         new_rel = urllib.parse.quote(new_rel)
 
-        new_md = new_md[: m.start(1)] + new_rel + new_md[m.end(1):]
+        new_md = new_md[: m.start(1)] + new_rel + new_md[m.end(1) :]
         search_start = m.start(1) + len(new_rel)
 
     return new_md
@@ -181,7 +200,9 @@ def _normalize_zip_path(p: str) -> str:
     return re.sub(r"[\\]+", "/", p).lstrip("./")
 
 
-def _ensure_zip_parent_dirs(zf: zipfile.ZipFile, file_path: str, date_time: Tuple[int, int, int, int, int, int]) -> None:
+def _ensure_zip_parent_dirs(
+    zf: zipfile.ZipFile, file_path: str, date_time: Tuple[int, int, int, int, int, int]
+) -> None:
     # Emit all parent directory entries for a given file path
     norm = _normalize_zip_path(file_path)
     parts = norm.split("/")
@@ -225,7 +246,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
         input_dir = "."  # If no directory, use current directory
 
     zip_name = os.path.basename(zip_path)
-    if zip_name.lower().endswith('.zip'):
+    if zip_name.lower().endswith(".zip"):
         base_name = zip_name[:-4]  # Remove .zip extension
     else:
         base_name = zip_name
@@ -260,7 +281,11 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
 
             # Handle nested zip (Notion sometimes wraps the export in another zip)
             top_entries = list(Path(tmp_dir).iterdir())
-            if len(top_entries) == 1 and top_entries[0].is_file() and top_entries[0].suffix.lower() == ".zip":
+            if (
+                len(top_entries) == 1
+                and top_entries[0].is_file()
+                and top_entries[0].suffix.lower() == ".zip"
+            ):
                 inner_zip_path = str(top_entries[0])
                 print(f"Detected nested zip: {inner_zip_path}")
                 with zipfile.ZipFile(inner_zip_path) as inner_zf:
@@ -282,7 +307,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                 for root, dirs, files in os.walk(tmp_dir):
                     for file in files:
                         # Skip zip files - we only want their extracted contents
-                        if file.lower().endswith('.zip'):
+                        if file.lower().endswith(".zip"):
                             continue
                         try:
                             abs_path = os.path.join(root, file)
@@ -316,11 +341,17 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
             # Handle collisions
             registry = set()
 
-            def reserve(parent: str, filename: str) -> str:
+            def reserve(parent: str, filename: str, original_path: str = "") -> str:
                 if filename not in registry:
                     registry.add(filename)
                     return filename
                 name_no_ext, ext = os.path.splitext(filename)
+                short_id = _extract_short_id_from_path(original_path)
+                if short_id:
+                    cand = f"{name_no_ext} {short_id}{ext}"
+                    if cand not in registry:
+                        registry.add(cand)
+                        return cand
                 i = 1
                 while True:
                     cand = f"{name_no_ext} ({i}){ext}"
@@ -333,7 +364,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
             final_map: Dict[str, str] = {}
             for rel_path, proposed_path in proposed.items():
                 parent, fname = os.path.split(proposed_path)
-                final_fname = reserve(parent, fname)
+                final_fname = reserve(parent, fname, rel_path)
                 final_map[rel_path] = os.path.join(parent, final_fname)
 
             # Second pass: write output zip with renamed files and fixed links
@@ -347,19 +378,27 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                             try:
                                 with open(abs_path, "r", encoding="utf-8") as f:
                                     md_content = f.read()
-                                md_content = md_file_rewrite(renamer, rel_path, md_content, final_map)
+                                md_content = md_file_rewrite(
+                                    renamer, rel_path, md_content, final_map
+                                )
                                 zi = zipfile.ZipInfo(_normalize_zip_path(final_path))
                                 _set_zip_permissions(zi)
-                                _ensure_zip_parent_dirs(out_zf, final_path, zi.date_time)
+                                _ensure_zip_parent_dirs(
+                                    out_zf, final_path, zi.date_time
+                                )
                                 out_zf.writestr(zi, md_content.encode("utf-8"))
                             except Exception as e:
-                                error_msg = f"Failed to process markdown '{rel_path}': {e}"
+                                error_msg = (
+                                    f"Failed to process markdown '{rel_path}': {e}"
+                                )
                                 print(f"Warning: {error_msg}")
                                 errors.append((rel_path, error_msg))
                                 # Copy as-is
                                 zi = zipfile.ZipInfo(_normalize_zip_path(final_path))
                                 _set_zip_permissions(zi)
-                                _ensure_zip_parent_dirs(out_zf, final_path, zi.date_time)
+                                _ensure_zip_parent_dirs(
+                                    out_zf, final_path, zi.date_time
+                                )
                                 out_zf.write(abs_path, _normalize_zip_path(final_path))
                         else:
                             # Copy other files as-is
@@ -368,7 +407,9 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                             _ensure_zip_parent_dirs(out_zf, final_path, zi.date_time)
                             out_zf.write(abs_path, _normalize_zip_path(final_path))
                     except Exception as e:
-                        error_msg = f"Failed to write file '{rel_path}' to output zip: {e}"
+                        error_msg = (
+                            f"Failed to write file '{rel_path}' to output zip: {e}"
+                        )
                         print(f"Warning: {error_msg}")
                         errors.append((rel_path, error_msg))
                         continue
@@ -384,7 +425,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
             nested_files = []
 
             # Look for any zip file in the main zip
-            zip_files = [f for f in all_files if f.lower().endswith('.zip')]
+            zip_files = [f for f in all_files if f.lower().endswith(".zip")]
             if zip_files:
                 # Use the first zip file found (typically there's only one)
                 nested_zip_name = zip_files[0]
@@ -397,7 +438,11 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
 
                     # Process files within the nested zip in memory
                     with zipfile.ZipFile(io.BytesIO(nested_zip_data)) as inner_zf:
-                        nested_files = [info.filename for info in inner_zf.infolist() if not info.is_dir()]
+                        nested_files = [
+                            info.filename
+                            for info in inner_zf.infolist()
+                            if not info.is_dir()
+                        ]
 
                 except Exception as e:
                     error_msg = f"Failed to read nested zip '{nested_zip_name}': {e}"
@@ -418,14 +463,27 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                     # Find common directory prefix (e.g., 'Export-2023-11-17/')
                     common_prefix = os.path.commonprefix(nested_files)
                     # Ensure it's a complete directory path (ends with / and all files start with it)
-                    if common_prefix and common_prefix.endswith('/') and all(f.startswith(common_prefix) for f in nested_files):
-                        print(f"Stripping common directory prefix: {common_prefix.rstrip('/')}")
+                    if (
+                        common_prefix
+                        and common_prefix.endswith("/")
+                        and all(f.startswith(common_prefix) for f in nested_files)
+                    ):
+                        print(
+                            f"Stripping common directory prefix: {common_prefix.rstrip('/')}"
+                        )
                     else:
                         common_prefix = ""
 
                 # file_entries: (processed_path, zip_data, original_path)
                 # processed_path is used for renaming logic, original_path for reading from zip
-                file_entries = [(f[len(common_prefix):] if common_prefix else f, nested_zip_data, f) for f in nested_files]
+                file_entries = [
+                    (
+                        f[len(common_prefix) :] if common_prefix else f,
+                        nested_zip_data,
+                        f,
+                    )
+                    for f in nested_files
+                ]
             else:
                 # Use main zip files: (processed_path, zip_data, original_path)
                 file_entries = [(f, None, f) for f in all_files]
@@ -450,11 +508,17 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
             # Handle collisions
             registry = set()
 
-            def reserve(parent: str, filename: str) -> str:
+            def reserve(parent: str, filename: str, original_path: str = "") -> str:
                 if filename not in registry:
                     registry.add(filename)
                     return filename
                 name_no_ext, ext = os.path.splitext(filename)
+                short_id = _extract_short_id_from_path(original_path)
+                if short_id:
+                    cand = f"{name_no_ext} {short_id}{ext}"
+                    if cand not in registry:
+                        registry.add(cand)
+                        return cand
                 i = 1
                 while True:
                     cand = f"{name_no_ext} ({i}){ext}"
@@ -468,7 +532,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
             for rel_path, _, _ in file_entries:
                 proposed_path = proposed[rel_path]
                 parent, fname = os.path.split(proposed_path)
-                final_fname = reserve(parent, fname)
+                final_fname = reserve(parent, fname, rel_path)
                 final_map[rel_path] = os.path.join(parent, final_fname)
 
             # Write output zip with renamed files and fixed links
@@ -492,14 +556,20 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                             # Process markdown content
                             try:
                                 md_content = file_content.decode("utf-8")
-                                md_content = md_file_rewrite(renamer, rel_path, md_content, final_map)
+                                md_content = md_file_rewrite(
+                                    renamer, rel_path, md_content, final_map
+                                )
                                 file_content = md_content.encode("utf-8")
                             except UnicodeDecodeError as e:
-                                error_msg = f"Failed to decode markdown '{rel_path}': {e}"
+                                error_msg = (
+                                    f"Failed to decode markdown '{rel_path}': {e}"
+                                )
                                 print(f"Warning: {error_msg}")
                                 errors.append((rel_path, error_msg))
                             except Exception as e:
-                                error_msg = f"Failed to process markdown '{rel_path}': {e}"
+                                error_msg = (
+                                    f"Failed to process markdown '{rel_path}': {e}"
+                                )
                                 print(f"Warning: {error_msg}")
                                 errors.append((rel_path, error_msg))
 
@@ -516,7 +586,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                         continue
 
     # Write log file
-    with open(log_file_path, 'w', encoding='utf-8') as log_f:
+    with open(log_file_path, "w", encoding="utf-8") as log_f:
         if filename_too_long:
             log_f.write("FILENAME TOO LONG (truncated to 200 chars):\n")
             for path, original_name, length in filename_too_long:
@@ -534,7 +604,6 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                 for orig in orig_paths:
                     log_f.write(f"  {orig}\n")
                 log_f.write("\n")
-        
 
     print(f"Output written to: {new_zip_path}")
     print(f"Log written to: {log_file_path}")
@@ -545,21 +614,26 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
     """
     CLI entrypoint.
     """
-    parser = argparse.ArgumentParser(description="Fixes Notion export zip files by removing IDs and fixing links.")
+    parser = argparse.ArgumentParser(
+        description="Fixes Notion export zip files by removing IDs and fixing links."
+    )
     parser.add_argument("zip_path", type=str, help="Path to Notion exported .zip file")
     parser.add_argument(
         "--use-disk-extraction",
         action="store_true",
         help="Extract files to disk before processing (original method). "
-             "By default, files are processed directly from zip to avoid path length issues."
+        "By default, files are processed directly from zip to avoid path length issues.",
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     import time
+
     start_time = time.time()
 
     try:
-        out_file = process_notion_zip(args.zip_path, use_disk_extraction=args.use_disk_extraction)
+        out_file = process_notion_zip(
+            args.zip_path, use_disk_extraction=args.use_disk_extraction
+        )
         print(f"--- Finished in {time.time() - start_time:.2f} seconds ---")
         print(f"Output file: {out_file}")
     except Exception as e:
