@@ -201,7 +201,10 @@ def _normalize_zip_path(p: str) -> str:
 
 
 def _ensure_zip_parent_dirs(
-    zf: zipfile.ZipFile, file_path: str, date_time: Tuple[int, int, int, int, int, int]
+    zf: zipfile.ZipFile,
+    file_path: str,
+    date_time: Tuple[int, int, int, int, int, int],
+    emitted_dirs: Optional[set] = None,
 ) -> None:
     # Emit all parent directory entries for a given file path
     norm = _normalize_zip_path(file_path)
@@ -209,6 +212,10 @@ def _ensure_zip_parent_dirs(
     acc = ""
     for i in range(len(parts) - 1):
         acc = f"{acc}{parts[i]}/"
+        if emitted_dirs is not None:
+            if acc in emitted_dirs:
+                continue
+            emitted_dirs.add(acc)
         zi = zipfile.ZipInfo(acc, date_time)
         _set_zip_permissions(zi, is_dir=True)
         zf.writestr(zi, b"")
@@ -368,6 +375,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                 final_map[rel_path] = os.path.join(parent, final_fname)
 
             # Second pass: write output zip with renamed files and fixed links
+            emitted_dirs: set = set()
             with zipfile.ZipFile(new_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
                 for rel_path, abs_path in file_entries:
                     final_path = final_map[rel_path]
@@ -384,7 +392,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                                 zi = zipfile.ZipInfo(_normalize_zip_path(final_path))
                                 _set_zip_permissions(zi)
                                 _ensure_zip_parent_dirs(
-                                    out_zf, final_path, zi.date_time
+                                    out_zf, final_path, zi.date_time, emitted_dirs
                                 )
                                 out_zf.writestr(zi, md_content.encode("utf-8"))
                             except Exception as e:
@@ -397,14 +405,16 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                                 zi = zipfile.ZipInfo(_normalize_zip_path(final_path))
                                 _set_zip_permissions(zi)
                                 _ensure_zip_parent_dirs(
-                                    out_zf, final_path, zi.date_time
+                                    out_zf, final_path, zi.date_time, emitted_dirs
                                 )
                                 out_zf.write(abs_path, _normalize_zip_path(final_path))
                         else:
                             # Copy other files as-is
                             zi = zipfile.ZipInfo(_normalize_zip_path(final_path))
                             _set_zip_permissions(zi)
-                            _ensure_zip_parent_dirs(out_zf, final_path, zi.date_time)
+                            _ensure_zip_parent_dirs(
+                                out_zf, final_path, zi.date_time, emitted_dirs
+                            )
                             out_zf.write(abs_path, _normalize_zip_path(final_path))
                     except Exception as e:
                         error_msg = (
@@ -536,6 +546,7 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                 final_map[rel_path] = os.path.join(parent, final_fname)
 
             # Write output zip with renamed files and fixed links
+            emitted_dirs: set = set()
             with zipfile.ZipFile(new_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
                 for rel_path, zip_data, original_path in file_entries:
                     final_path = final_map[rel_path]
@@ -576,7 +587,9 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                         # Write to output zip
                         zi = zipfile.ZipInfo(_normalize_zip_path(final_path))
                         _set_zip_permissions(zi)
-                        _ensure_zip_parent_dirs(out_zf, final_path, zi.date_time)
+                        _ensure_zip_parent_dirs(
+                            out_zf, final_path, zi.date_time, emitted_dirs
+                        )
                         out_zf.writestr(zi, file_content)
 
                     except Exception as e:
