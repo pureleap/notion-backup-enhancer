@@ -14,11 +14,18 @@ from pathlib import Path
 from export_fix import process_notion_zip
 
 
+def _pause() -> None:
+    try:
+        input("Press Enter to exit...")
+    except EOFError:
+        pass
+
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: Drag and drop a Notion export zip file onto this executable.")
         print("Or run: NotionBackupEnhancer.exe <path_to_zip_file>")
-        input("Press Enter to exit...")
+        _pause()
         sys.exit(1)
 
     zip_path = sys.argv[1]
@@ -26,13 +33,13 @@ def main():
     # Check if the file exists
     if not os.path.exists(zip_path):
         print(f"Error: File not found: {zip_path}")
-        input("Press Enter to exit...")
+        _pause()
         sys.exit(1)
 
     # Check if it's a zip file
-    if not zip_path.lower().endswith('.zip'):
+    if not zip_path.lower().endswith(".zip"):
         print(f"Error: File must be a .zip file: {zip_path}")
-        input("Press Enter to exit...")
+        _pause()
         sys.exit(1)
 
     try:
@@ -46,11 +53,11 @@ def main():
 
     except Exception as e:
         print(f"Error processing file: {e}")
-        input("Press Enter to exit...")
+        _pause()
         sys.exit(1)
 
     # Keep console open so user can see the results
-    input("Press Enter to exit...")
+    _pause()
 
 
 if __name__ == "__main__":
