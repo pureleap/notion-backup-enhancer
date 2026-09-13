@@ -136,6 +136,36 @@ class TestExportFix:
         # Embedded zip content must not be extracted to the zip root
         assert "program.exe" not in names and "readme.txt" not in names
 
+    def test_identical_name_duplicates_get_distinct_paths(self):
+        """Identical repeated entries must not overwrite each other in output."""
+        file_name = "Quotes c09743d178b04a50b7123c1304394ef2.md"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for i in range(1, 6):
+                z.writestr(file_name, f"# Quotes copy {i}\n".encode("utf-8"))
+        zf = self._write_and_process(buf.getvalue())
+        names = zf.namelist()
+        file_names = [n for n in names if not n.endswith("/")]
+        assert len(file_names) == 5, f"Expected 5 output files, got {file_names}"
+        assert len(set(file_names)) == 5, f"Duplicate output names: {file_names}"
+        # All copies must retain their distinct content
+        contents = {zf.read(n).decode("utf-8") for n in file_names}
+        assert contents == {f"# Quotes copy {i}\n" for i in range(1, 6)}
+
+    def test_top_level_dir_stripped_without_wrapper(self):
+        """A flat export (no wrapper) must strip its top-level folder."""
+        export_id = "3d6a72ce-d218-4396-b162-536d999086a6"
+        prefix = f"Export-{export_id}"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr(f"{prefix}/Home.md", "# Home\n")
+            z.writestr(f"{prefix}/Tasks.csv", "a,b\n1,2\n")
+        zf = self._write_and_process(buf.getvalue())
+        names = zf.namelist()
+        assert "Home.md" in names, f"Home.md should be at zip root, got {names}"
+        assert "Tasks.csv" in names, f"Tasks.csv should be at zip root, got {names}"
+        assert not any(n.startswith(prefix + "/") for n in names), names
+
     def test_export_wrapper_zip_still_unwrapped(self):
         """A genuine Notion export wrapper zip should still be unwrapped."""
         export_id = "b8f52cdf-c19e-4827-8fd2-5385108bebd6"

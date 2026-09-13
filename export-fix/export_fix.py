@@ -232,6 +232,25 @@ def _is_zip(path: str) -> bool:
         return False
 
 
+def _strip_common_dir_prefix(paths: List[str]) -> str:
+    """
+    Get a common directory prefix stripped from all given paths.
+
+    Returns only a complete directory prefix (e.g. 'Export-<uuid>/') that is
+    shared by every path; otherwise returns an empty string.
+    """
+    if not paths:
+        return ""
+    common_prefix = os.path.commonprefix(paths)
+    if (
+        common_prefix
+        and common_prefix.endswith("/")
+        and all(f.startswith(common_prefix) for f in paths)
+    ):
+        return common_prefix
+    return ""
+
+
 def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
     """
     Processes a Notion export zip file by removing IDs from filenames and fixing links.
@@ -297,6 +316,8 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
     errors = []
     duplicates = {}
     filename_too_long = []
+    final_paths: List[str] = []
+    duplicate_resolved: Dict[str, List[str]] = defaultdict(list)
 
     print(f"Processing '{zip_path}'...")
     if use_disk_extraction:
@@ -411,18 +432,25 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                     i += 1
 
             # Final mapping with collision resolution
-            final_map: Dict[str, str] = {}
+            # reserve() is called per file entry so that entries with identical
+            # original paths still receive distinct output paths.
+            final_paths = []
+            final_map: Dict[
+                str, str
+            ] = {}  # original path -> final (for link rewriting)
             for rel_path, proposed_path in proposed.items():
                 parent, fname = os.path.split(proposed_path)
                 final_fname = reserve(parent, fname, rel_path)
-                final_map[rel_path] = os.path.join(parent, final_fname)
+                final = os.path.join(parent, final_fname)
+                final_paths.append(final)
+                final_map[rel_path] = final
 
             # Second pass: write output zip with renamed files and fixed links
             emitted_dirs: set = set()
             with zipfile.ZipFile(new_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
-                for rel_path, abs_path in file_entries:
-                    final_path = final_map[rel_path]
-
+                for final_path, (rel_path, _, abs_path) in zip(
+                    final_paths, file_entries
+                ):
                     try:
                         if rel_path.lower().endswith(".md"):
                             # Read and rewrite markdown
@@ -470,7 +498,8 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
         # New zip-to-zip processing (resilient to path length issues)
         with zipfile.ZipFile(zip_path) as zf:
             # Get all file paths from the main zip
-            all_files = [info.filename for info in zf.infolist() if not info.is_dir()]
+            all_infos = [info for info in zf.infolist() if not info.is_dir()]
+            all_files = [info.filename for info in all_infos]
 
             # Check for nested export wrapper zip (Notion sometimes wraps the
             # export in another zip). Embedded zip attachments inside pages are
@@ -522,42 +551,52 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                 # All nested files share the same zip data
 
                 # Strip common top-level directory prefix to place files directly in zip root
-                common_prefix = ""
-                if nested_files:
-                    # Find common directory prefix (e.g., 'Export-2023-11-17/')
-                    common_prefix = os.path.commonprefix(nested_files)
-                    # Ensure it's a complete directory path (ends with / and all files start with it)
-                    if (
-                        common_prefix
-                        and common_prefix.endswith("/")
-                        and all(f.startswith(common_prefix) for f in nested_files)
-                    ):
-                        print(
-                            f"Stripping common directory prefix: {common_prefix.rstrip('/')}"
-                        )
-                    else:
-                        common_prefix = ""
+                common_prefix = _strip_common_dir_prefix(nested_files)
+                if common_prefix:
+                    print(
+                        f"Stripping common directory prefix: {common_prefix.rstrip('/')}"
+                    )
 
-                # file_entries: (processed_path, zip_data, original_path)
-                # processed_path is used for renaming logic, original_path for reading from zip
+                # file_entries: (processed_path, zip_data, original_path, main_info)
+                # processed_path is used for renaming logic, original_path for
+                # reading from the nested zip; main_info is only set when reading
+                # directly from the main zip so duplicate entries are not collapsed
                 file_entries = [
                     (
                         f[len(common_prefix) :] if common_prefix else f,
                         nested_zip_data,
                         f,
+                        None,
                     )
                     for f in nested_files
                 ]
             else:
-                # Use main zip files: (processed_path, zip_data, original_path)
-                file_entries = [(f, None, f) for f in all_files]
+                # Use main zip files: (processed_path, zip_data, original_path, main_info)
+                # Strip a common top-level directory (e.g. 'Export-<uuid>/') so
+                # pages sit at the zip root even without a nested wrapper zip
+                common_prefix = _strip_common_dir_prefix(all_files)
+                if common_prefix:
+                    print(
+                        f"Stripping common directory prefix: {common_prefix.rstrip('/')}"
+                    )
+                file_entries = [
+                    (
+                        info.filename[len(common_prefix) :]
+                        if common_prefix
+                        else info.filename,
+                        None,
+                        info.filename,
+                        info,
+                    )
+                    for info in all_infos
+                ]
 
             # Initialize renamer
             renamer = NotionExportRenamer(filename_too_long_tracker=filename_too_long)
 
             # Build proposed renames
             proposed: Dict[str, str] = {}
-            for rel_path, _, _ in file_entries:
+            for rel_path, _, _, _ in file_entries:
                 new_path = renamer.rename_path(rel_path)
                 proposed[rel_path] = new_path
 
@@ -592,19 +631,34 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                     i += 1
 
             # Final mapping with collision resolution
-            final_map: Dict[str, str] = {}
-            for rel_path, _, _ in file_entries:
+            # reserve() is called per file entry so that entries with identical
+            # original paths (Notion sometimes duplicates a page entry) still
+            # receive distinct output paths instead of overwriting each other.
+            final_paths = []
+            final_map: Dict[
+                str, str
+            ] = {}  # original path -> final (for link rewriting)
+            for rel_path, _, _, _ in file_entries:
                 proposed_path = proposed[rel_path]
                 parent, fname = os.path.split(proposed_path)
                 final_fname = reserve(parent, fname, rel_path)
-                final_map[rel_path] = os.path.join(parent, final_fname)
+                final = os.path.join(parent, final_fname)
+                final_paths.append(final)
+                final_map[rel_path] = final
+
+            # Track resolved (final) name per proposed name so the duplicate
+            # log can show how name collisions were resolved
+            duplicate_resolved = defaultdict(list)
+            for entry, final in zip(file_entries, final_paths):
+                rel_path = entry[0]
+                duplicate_resolved[proposed[rel_path]].append(final)
 
             # Write output zip with renamed files and fixed links
             emitted_dirs: set = set()
             with zipfile.ZipFile(new_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
-                for rel_path, zip_data, original_path in file_entries:
-                    final_path = final_map[rel_path]
-
+                for final_path, (rel_path, zip_data, original_path, main_info) in zip(
+                    final_paths, file_entries
+                ):
                     try:
                         # Read file content
                         if zip_data is not None:
@@ -613,8 +667,10 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                                 with inner_zf.open(original_path) as file_obj:
                                     file_content = file_obj.read()
                         else:
-                            # Read from main zip
-                            with zf.open(rel_path) as file_obj:
+                            # Read from main zip via the entry's ZipInfo so
+                            # duplicate entries are not collapsed to their
+                            # first occurrence
+                            with zf.open(main_info) as file_obj:  # type: ignore[arg-type]
                                 file_content = file_obj.read()
 
                         if rel_path.lower().endswith(".md"):
@@ -670,6 +726,11 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                 log_f.write(f"Proposed name: {prop_path}\n")
                 for orig in orig_paths:
                     log_f.write(f"  {orig}\n")
+                resolved = duplicate_resolved.get(prop_path, [])
+                if len(resolved) > 1:
+                    log_f.write("  Resolved to:\n")
+                    for final in resolved:
+                        log_f.write(f"    {final}\n")
                 log_f.write("\n")
 
     print(f"Output written to: {new_zip_path}")
