@@ -3,3 +3,7 @@
 *log.txt
 __pycache__
 NotionBackupEnhancer*
+.build-venvs/
+export-fix/build/
+export-fix/dist/
+export-fix/*.spec
