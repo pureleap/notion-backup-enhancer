@@ -38,7 +38,7 @@ import zipfile
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 import shutil
 
 
@@ -261,6 +261,38 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
     new_zip_path = os.path.join(input_dir, new_zip_name)
     log_file_path = os.path.join(input_dir, f"{base_name}.log.txt")
 
+    def _read_nested_zip(nested_zip_name: str, nested_zip_data: bytes) -> List[str]:
+        """Get file list of a nested zip from its raw bytes."""
+        with zipfile.ZipFile(io.BytesIO(nested_zip_data)) as inner_zf:
+            return [info.filename for info in inner_zf.infolist() if not info.is_dir()]
+
+    def _is_export_wrapper(nested_zip_name: str, nested_zip_data: bytes) -> bool:
+        """
+        Detect whether a nested zip is a Notion export wrapper zip rather than an
+        embedded file attachment (e.g. a user-uploaded zip inside a page).
+
+        Notion export wrappers are either at the root of the outer zip or inside
+        a directory named after themselves (e.g. 'Export-<uuid>/Export-<uuid>.zip')
+        and contain markdown/csv export content. Embedded attachments live in
+        page directories with unrelated names.
+        """
+        try:
+            nested_files = _read_nested_zip(nested_zip_name, nested_zip_data)
+        except Exception:
+            return False
+
+        # Wrapper zips contain the actual export content (.md pages / .csv data)
+        if not any(f.lower().endswith((".md", ".csv")) for f in nested_files):
+            return False
+
+        # Location check: root of the outer zip, or in a directory with the same name
+        parent = os.path.dirname(nested_zip_name)
+        parent_name = os.path.basename(parent) if parent else ""
+        stem = os.path.basename(nested_zip_name)
+        if stem.lower().endswith(".zip"):
+            stem = stem[:-4]
+        return (not parent_name) or (parent_name.lower() == stem.lower())
+
     # Initialize error and duplicate collections
     errors = []
     duplicates = {}
@@ -288,13 +320,15 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
 
             # Handle nested zip (Notion sometimes wraps the export in another zip)
             top_entries = list(Path(tmp_dir).iterdir())
+            unwrapped_wrapper_path: Optional[str] = None
             if (
                 len(top_entries) == 1
                 and top_entries[0].is_file()
                 and top_entries[0].suffix.lower() == ".zip"
             ):
                 inner_zip_path = str(top_entries[0])
-                print(f"Detected nested zip: {inner_zip_path}")
+                unwrapped_wrapper_path = inner_zip_path
+                print(f"Detected nested export wrapper zip: {inner_zip_path}")
                 with zipfile.ZipFile(inner_zip_path) as inner_zf:
                     for info in inner_zf.infolist():
                         try:
@@ -313,8 +347,17 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
             try:
                 for root, dirs, files in os.walk(tmp_dir):
                     for file in files:
-                        # Skip zip files - we only want their extracted contents
+                        # Skip the export wrapper zip that was already unwrapped,
+                        # but keep embedded zip attachments as zip files
+                        if (
+                            unwrapped_wrapper_path is not None
+                            and os.path.join(root, file) == unwrapped_wrapper_path
+                        ):
+                            continue
                         if file.lower().endswith(".zip"):
+                            abs_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(abs_path, tmp_dir)
+                            file_entries.append((rel_path, None, abs_path))
                             continue
                         try:
                             abs_path = os.path.join(root, file)
@@ -429,31 +472,37 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
             # Get all file paths from the main zip
             all_files = [info.filename for info in zf.infolist() if not info.is_dir()]
 
-            # Check for nested zip - extract ONLY the zip file when found
+            # Check for nested export wrapper zip (Notion sometimes wraps the
+            # export in another zip). Embedded zip attachments inside pages are
+            # NOT wrappers and are kept as zip files in the output.
             nested_zip_data = None
             nested_zip_name = None
             nested_files = []
 
-            # Look for any zip file in the main zip
-            zip_files = [f for f in all_files if f.lower().endswith(".zip")]
-            if zip_files:
-                # Use the first zip file found (typically there's only one)
-                nested_zip_name = zip_files[0]
-                print(f"Detected nested zip: {nested_zip_name}")
-
-                # Extract ONLY the zip file content into memory
+            # Look for a zip file that qualifies as an export wrapper
+            zip_candidates = [f for f in all_files if f.lower().endswith(".zip")]
+            for candidate in zip_candidates:
                 try:
-                    with zf.open(nested_zip_name) as nested_zip_file:
-                        nested_zip_data = nested_zip_file.read()
+                    with zf.open(candidate) as nested_zip_file:
+                        candidate_data = nested_zip_file.read()
+                except Exception as e:
+                    error_msg = f"Failed to read nested zip '{candidate}': {e}"
+                    print(f"Warning: {error_msg}")
+                    errors.append((candidate, error_msg))
+                    continue
 
-                    # Process files within the nested zip in memory
-                    with zipfile.ZipFile(io.BytesIO(nested_zip_data)) as inner_zf:
-                        nested_files = [
-                            info.filename
-                            for info in inner_zf.infolist()
-                            if not info.is_dir()
-                        ]
+                if _is_export_wrapper(candidate, candidate_data):
+                    nested_zip_name = candidate
+                    nested_zip_data = candidate_data
+                    break
 
+            if nested_zip_name is not None:
+                print(f"Detected nested export wrapper zip: {nested_zip_name}")
+
+                # Process files within the nested zip in memory
+                try:
+                    assert nested_zip_data is not None
+                    nested_files = _read_nested_zip(nested_zip_name, nested_zip_data)
                 except Exception as e:
                     error_msg = f"Failed to read nested zip '{nested_zip_name}': {e}"
                     print(f"Warning: {error_msg}")
@@ -461,6 +510,11 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
                     # Fall back to processing main zip files
                     nested_zip_data = None
                     nested_files = []
+            elif zip_candidates:
+                print(
+                    f"Found {len(zip_candidates)} embedded zip file(s); "
+                    "keeping them as zip files in the output"
+                )
 
             # Use nested zip files if available, otherwise use main zip files
             if nested_files and nested_zip_data is not None:
