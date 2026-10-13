@@ -112,6 +112,15 @@ class TestExportFix:
                 data = f.read()
         return zipfile.ZipFile(io.BytesIO(data))
 
+    def _process_entries(self, entries):
+        """Process (name, content) pairs and return {output_name: content}."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for name, content in entries:
+                z.writestr(name, content)
+        zf = self._write_and_process(buf.getvalue())
+        return {n: zf.read(n) for n in zf.namelist() if not n.endswith("/")}
+
     def test_embedded_zip_kept_as_zip_and_pages_preserved(self):
         """Regression: embedded page-attached zips must not replace the whole export."""
         export_id = "3d6a72ce-d218-4396-b162-536d999086a6"
@@ -198,3 +207,36 @@ class TestExportFix:
         assert any(
             n.startswith("Pages/") and n.endswith("render.zip") for n in names
         ), names
+
+    def test_collision_names_stable_across_entry_order(self):
+        """An unchanged image keeps its output name when zip order changes."""
+        page_id = "1234567890abcdef1234567890abcdef"
+        plain = (f"Page {page_id}/alpha.png", b"A")
+        id_suffixed = (
+            f"Page {page_id}/alpha 11111111111111111111111111111111.png",
+            b"B",
+        )
+
+        first = self._process_entries([plain, id_suffixed])
+        second = self._process_entries([id_suffixed, plain])
+
+        def by_content(mapping):
+            return {content: name for name, content in mapping.items()}
+
+        assert len(set(first)) == 2, first
+        assert by_content(first) == by_content(second), (first, second)
+
+    def test_same_basename_in_different_folders_not_collided(self):
+        """Same-named files in different folders must not steal each other's name."""
+        entries = [
+            ("A/photo.png", b"A"),
+            ("B/photo.png", b"B"),
+        ]
+        output = self._process_entries(entries)
+        assert set(output) == {"A/photo.png", "B/photo.png"}, output
+
+    def test_existing_copy_suffix_stripped(self):
+        """A pre-existing ' (1)' suffix must not be preserved or compounded."""
+        entries = [("page/image (1).png", b"data")]
+        output = self._process_entries(entries)
+        assert set(output) == {"page/image.png"}, output
