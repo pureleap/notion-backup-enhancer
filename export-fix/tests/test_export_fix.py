@@ -4,11 +4,8 @@ Tests for export_fix.py functionality.
 
 import io
 import os
-import sys
 import tempfile
 import zipfile
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from export_fix import process_notion_zip
 

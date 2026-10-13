@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "notion-backup-enhancer"
+version = "0.1.0"
+description = "Fixes various issues in Notion workspace exports."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = []
+
+[project.scripts]
+notion-export-fix = "export_fix.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["export-fix/export_fix"]
+
+[tool.pytest.ini_options]
+testpaths = ["export-fix/tests"]
+pythonpath = ["export-fix"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+src = ["export-fix"]
+extend-exclude = ["export-fix/build", "export-fix/dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
