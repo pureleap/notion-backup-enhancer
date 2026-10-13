@@ -1,2 +1,2 @@
-!*.zip
+!test-data/*.zip
 .venv

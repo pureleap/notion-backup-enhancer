@@ -1,9 +1,12 @@
 *.zip
 *.zip.formatted
-*log.txt
+*.log.txt
 __pycache__
 NotionBackupEnhancer*
 .build-venvs/
+.venv/
+.pytest_cache/
+.ruff_cache/
 export-fix/build/
 export-fix/dist/
 export-fix/*.spec

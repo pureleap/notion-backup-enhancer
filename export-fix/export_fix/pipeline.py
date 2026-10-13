@@ -1,4 +1,4 @@
-"""Core pipeline: enumerates, renames, collision-resolves and writes the fixed export."""
+"""Core pipeline: rename files, resolve collisions and write the fixed export."""
 
 from __future__ import annotations
 
@@ -452,8 +452,9 @@ def process_notion_zip(zip_path: str, use_disk_extraction: bool = False) -> str:
 
     Args:
         zip_path: Path to the input Notion export .zip file
-        use_disk_extraction: If True, extract to disk before processing (original method).
-                           If False (default), process files directly from zip to avoid path length issues.
+        use_disk_extraction: If True, extract to disk before processing
+            (original method). If False (default), process files directly from
+            the zip to avoid path-length issues.
 
     Returns:
         Path to the output zip file (placed in same directory as input)

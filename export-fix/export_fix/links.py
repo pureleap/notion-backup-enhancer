@@ -11,6 +11,40 @@ from .naming import NotionExportRenamer
 from .ziputils import _normalize_zip_path
 
 MD_LINK_OR_IMAGE_RE = re.compile(r"!?\[.+?\]\(([\w\d\-._~:/?=#%\]\[@!$&'\(\)*+,;]+?)\)")
+# Notion exports relation/property values as "Label (../Folder/Page%20<id>.md)"
+# rather than as proper Markdown links. Match the parenthesized path so these
+# get rewritten too. A negative lookbehind avoids re-matching the URL part of a
+# real Markdown link "[label](url)".
+PROPERTY_LINK_RE = re.compile(
+    r"(?<!\])\((\.\.?/[^()\s]*\.md|[^()\s/]+/[^()\s]*\.md)(#[^()\s]*)?\)"
+)
+
+
+def _new_relative_url(
+    renamer: NotionExportRenamer,
+    md_file_path: str,
+    url: str,
+    final_map: Dict[str, str],
+) -> str:
+    """Resolve a link target to its final path and relativize it."""
+    rel_target = urllib.parse.unquote(url)
+
+    # Resolve target's final path
+    md_dir = os.path.dirname(md_file_path)
+    target_abs_rel = os.path.normpath(os.path.join(md_dir, rel_target))
+    target_abs_rel_norm = _normalize_zip_path(target_abs_rel)
+    if target_abs_rel_norm in final_map:
+        target_final = _normalize_zip_path(final_map[target_abs_rel_norm])
+    else:
+        # Fallback: rename the target path
+        target_final = _normalize_zip_path(renamer.rename_path(target_abs_rel_norm))
+
+    # Compute relative path from the md file's final directory
+    md_final_path = _normalize_zip_path(final_map.get(md_file_path, md_file_path))
+    md_final_dir = os.path.dirname(md_final_path)
+    new_rel = os.path.relpath(target_final, md_final_dir or ".")
+    new_rel = re.sub(r"[\\]+", "/", new_rel)
+    return urllib.parse.quote(new_rel)
 
 
 def md_file_rewrite(
@@ -32,6 +66,8 @@ def md_file_rewrite(
         New markdown contents as str.
     """
     new_md = md_file_contents
+
+    # Pass 1: proper Markdown links/images "[label](url)".
     search_start = 0
     while True:
         m = MD_LINK_OR_IMAGE_RE.search(new_md, pos=search_start)
@@ -43,26 +79,23 @@ def md_file_rewrite(
         if re.search(r":/", url):
             search_start = m.end(1)
             continue
-        rel_target = urllib.parse.unquote(url)
 
-        # Resolve target's final path
-        md_dir = os.path.dirname(md_file_path)
-        target_abs_rel = os.path.normpath(os.path.join(md_dir, rel_target))
-        target_abs_rel_norm = _normalize_zip_path(target_abs_rel)
-        if target_abs_rel_norm in final_map:
-            target_final = _normalize_zip_path(final_map[target_abs_rel_norm])
-        else:
-            # Fallback: rename the target path
-            target_final = _normalize_zip_path(renamer.rename_path(target_abs_rel_norm))
-
-        # Compute relative path from the md file's final directory
-        md_final_path = _normalize_zip_path(final_map.get(md_file_path, md_file_path))
-        md_final_dir = os.path.dirname(md_final_path)
-        new_rel = os.path.relpath(target_final, md_final_dir or ".")
-        new_rel = re.sub(r"[\\]+", "/", new_rel)
-        new_rel = urllib.parse.quote(new_rel)
-
+        new_rel = _new_relative_url(renamer, md_file_path, url, final_map)
         new_md = new_md[: m.start(1)] + new_rel + new_md[m.end(1) :]
+        search_start = m.start(1) + len(new_rel)
+
+    # Pass 2: Notion property links "Label (../Folder/Page.md)".
+    search_start = 0
+    while True:
+        m = PROPERTY_LINK_RE.search(new_md, pos=search_start)
+        if not m:
+            break
+
+        url = m.group(1)
+        anchor = m.group(2) or ""
+        end = m.end(2) if m.group(2) is not None else m.end(1)
+        new_rel = _new_relative_url(renamer, md_file_path, url, final_map) + anchor
+        new_md = new_md[: m.start(1)] + new_rel + new_md[end:]
         search_start = m.start(1) + len(new_rel)
 
     return new_md

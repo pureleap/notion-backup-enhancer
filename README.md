@@ -105,3 +105,20 @@ You'll need Git installed on your computer. If you're not sure:
 For more detailed Git commands, see GitHub's [uploading a project guide](https://docs.github.com/en/get-started/getting-started-with-git/uploading-a-project-using-the-command-line).
 
 **Tip**: Repeat Steps 5-6 whenever you create a new backup. GitHub will keep a history of all your changes, so you can see what changed between backups and easily restore previous versions.
+
+## Development
+
+The Python project lives in `export-fix/` and is managed with [uv](https://docs.astral.sh/uv/).
+No manual virtualenv or `pip` install is required.
+
+Run from the repository root:
+
+```bash
+uv run pytest                       # run the tests
+uv run ruff check export-fix        # lint
+uv run ruff format export-fix       # format
+uv run notion-export-fix backup.zip # run the CLI against an export
+```
+
+`uv` creates and updates `.venv` automatically from `pyproject.toml`. Commit changes to
+`uv.lock` whenever dependencies change.

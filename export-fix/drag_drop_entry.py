@@ -2,15 +2,14 @@
 """
 Drag-and-drop entry point for Notion Backup Enhancer.
 
-This script serves as the entry point for the Windows executable created by PyInstaller.
-When a user drops a zip file on the executable, Windows passes the file path as a command line argument.
+This script serves as the entry point for the Windows executable created by
+PyInstaller. When a user drops a zip file on the executable, Windows passes the
+file path as a command line argument.
 """
 
-import sys
 import os
-from pathlib import Path
+import sys
 
-# Import the main processing function
 from export_fix import process_notion_zip
 
 
