@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .links import md_file_rewrite
-from .naming import NotionExportRenamer, _extract_short_id_from_path
+from .naming import NotionExportRenamer, _stable_short_id
 from .ziputils import (
     _ensure_zip_parent_dirs,
     _is_export_wrapper,
@@ -261,49 +261,73 @@ def _resolve_collisions(
 ) -> Tuple[List[str], Dict[str, str], Dict[str, List[str]]]:
     """Resolve output-path collisions deterministically.
 
-    reserve() is called per file entry so that entries with identical
-    original paths (Notion sometimes duplicates a page entry) still
-    receive distinct output paths instead of overwriting each other.
+    Collisions are detected on the full relative path, so same-named files
+    in different folders never collide. Within a folder, colliding entries
+    are ordered by their original path and given a suffix derived from that
+    path, so an unchanged file keeps the same output name across exports
+    even when the order of entries in the zip changes.
+
+    Entries with identical original paths (Notion sometimes duplicates a
+    page entry) still receive distinct output paths instead of overwriting
+    each other.
 
     Returns (final_paths, final_map, duplicate_resolved).
     """
-    registry = set()
+    registry: set = set()
 
-    def reserve(filename: str, original_path: str = "") -> str:
-        if filename not in registry:
-            registry.add(filename)
-            return filename
-        name_no_ext, ext = os.path.splitext(filename)
-        short_id = _extract_short_id_from_path(original_path)
-        if short_id:
-            cand = f"{name_no_ext} {short_id}{ext}"
-            if cand not in registry:
-                registry.add(cand)
-                return cand
-        i = 1
-        while True:
-            cand = f"{name_no_ext} ({i}){ext}"
-            if cand not in registry:
-                registry.add(cand)
-                return cand
-            i += 1
+    groups: Dict[str, List[int]] = defaultdict(list)
+    for index, entry in enumerate(file_entries):
+        groups[proposed[entry.processed_path]].append(index)
 
-    final_paths: List[str] = []
-    final_map: Dict[str, str] = {}  # original path -> final (for link rewriting)
-    for entry in file_entries:
-        rel_path = entry.processed_path
-        proposed_path = proposed[rel_path]
+    final_by_index: Dict[int, str] = {}
+
+    def _reserve(full_path: str) -> bool:
+        if full_path in registry:
+            return False
+        registry.add(full_path)
+        return True
+
+    for proposed_path, indices in groups.items():
+        if len(indices) == 1:
+            _reserve(proposed_path)
+            final_by_index[indices[0]] = proposed_path
+            continue
+
         parent, fname = os.path.split(proposed_path)
-        final_fname = reserve(fname, rel_path)
-        final = os.path.join(parent, final_fname)
-        final_paths.append(final)
-        final_map[rel_path] = final
+        name_no_ext, ext = os.path.splitext(fname)
 
-    # Track resolved (final) name per proposed name so the duplicate
-    # log can show how name collisions were resolved
+        # Sort by original path so the result does not depend on the order
+        # in which the zip/disk enumeration yielded the entries.
+        ordered = sorted(indices, key=lambda i: file_entries[i].processed_path)
+        for position, index in enumerate(ordered):
+            if position == 0:
+                _reserve(proposed_path)
+                final_by_index[index] = proposed_path
+                continue
+
+            short_id = _stable_short_id(file_entries[index].processed_path)
+            candidate = os.path.join(parent, f"{name_no_ext} {short_id}{ext}")
+            if _reserve(candidate):
+                final_by_index[index] = candidate
+                continue
+
+            i = 1
+            while True:
+                candidate = os.path.join(parent, f"{name_no_ext} ({i}){ext}")
+                if _reserve(candidate):
+                    final_by_index[index] = candidate
+                    break
+                i += 1
+
+    final_paths: List[str] = [final_by_index[i] for i in range(len(file_entries))]
+
+    # original path -> final (for link rewriting)
+    final_map: Dict[str, str] = {}
     duplicate_resolved: Dict[str, List[str]] = defaultdict(list)
-    for entry, final in zip(file_entries, final_paths):
-        duplicate_resolved[proposed[entry.processed_path]].append(final)
+    for index, entry in enumerate(file_entries):
+        rel_path = entry.processed_path
+        final_map[rel_path] = final_by_index[index]
+        duplicate_resolved[proposed[rel_path]].append(final_by_index[index])
 
     return final_paths, final_map, duplicate_resolved
 
