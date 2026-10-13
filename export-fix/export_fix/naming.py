@@ -9,22 +9,20 @@ from typing import Dict, List, Optional
 
 ID_SUFFIX_RE = re.compile(r"(.+?)\s([0-9a-f]{32})$", re.IGNORECASE)
 INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
+TRAILING_COPY_SUFFIX_RE = re.compile(r"\s*\(\d{1,3}\)$")
 
 
-def _extract_short_id_from_path(path: str) -> str:
-    """Extract a deterministic short hash from a Notion ID embedded in the path."""
-    parts = re.split(r"[\\/]", path)
-    for part in parts:
-        name_no_ext = os.path.splitext(part)[0]
-        m = ID_SUFFIX_RE.search(name_no_ext)
-        if m:
-            return hashlib.sha256(m.group(2).encode()).hexdigest()[:8]
-        if re.match(r"^[0-9a-f]{32}$", name_no_ext, re.IGNORECASE):
-            return hashlib.sha256(name_no_ext.lower().encode()).hexdigest()[:8]
-        all_match = re.search(r"([0-9a-f]{32})_all", name_no_ext, re.IGNORECASE)
-        if all_match:
-            return hashlib.sha256(all_match.group(1).encode()).hexdigest()[:8]
-    return ""
+def _stable_short_id(path: str) -> str:
+    """Return a deterministic short hash identifying a specific file.
+
+    Hashing the file's own full relative path (rather than the page
+    directory's Notion ID, which every attachment in a page shares) means
+    each attachment gets its own suffix. Because the suffix depends only on
+    the file's path, it stays the same across exports even when the order of
+    entries in the zip changes.
+    """
+    normalized = re.sub(r"[\\/]+", "/", path).strip("/")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:8]
 
 
 class NotionExportRenamer:
@@ -81,6 +79,12 @@ class NotionExportRenamer:
                     new_name_no_ext = base_part + "_all" + suffix_part
                 else:
                     new_name_no_ext = name_no_ext
+
+        # Drop an existing copy suffix (e.g. " (1)") so re-exports do not
+        # compound it into " (2)", " (3)", ...
+        stripped = TRAILING_COPY_SUFFIX_RE.sub("", new_name_no_ext).rstrip()
+        if stripped:
+            new_name_no_ext = stripped
 
         # Sanitize
         new_name_no_ext = self._sanitize_name(new_name_no_ext, path_to_rename)
